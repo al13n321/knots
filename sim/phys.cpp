@@ -1,4 +1,6 @@
+#ifdef _WIN32
 #pragma warning(disable:4267) // implicit conversions between integer types
+#endif
 #include "sim/scene.h"
 #include "util/linear.h"
 #include "util/print.h"

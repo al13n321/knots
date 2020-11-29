@@ -1,6 +1,8 @@
+#ifdef _WIN32
 #pragma warning(disable:4305) // converting double literal to float
 #pragma warning(disable:4244) // converting double to float
 #pragma warning(disable:4267) // implicit conversions between integer types
+#endif
 #include "sim/scene.h"
 #include "gl-util/gl-common.h"
 using namespace std;

@@ -1,4 +1,6 @@
+#ifdef _WIN32
 #pragma warning(disable:4305) // truncating double literal to float
+#endif
 #include <iostream>
 #include "gl-util/glfw-util.h"
 #include "util/stopwatch.h"
@@ -119,7 +121,7 @@ int main() {
                    for (auto& v : scene.rope.verts) v.pos += d;
 #else
                    manip.pos = scene.rope.verts[0].pos;
-                   manip.vel = 0;
+                   manip.vel = dvec3();
 #endif
                  };
 
@@ -129,7 +131,7 @@ int main() {
 
     Camera camera;
     camera.pos = fvec3(-1.5, .24, 1.);
-    camera.LookAt((scene.rope.verts[0].pos+scene.rope.verts[std::min(scene.rope.verts.size() - 1, 30ull)].pos*2)/3);
+    camera.LookAt((scene.rope.verts[0].pos+scene.rope.verts[std::min((int)scene.rope.verts.size() - 1, 30)].pos*2)/3);
 
     Stopwatch frame_stopwatch;
     while (!window->ShouldClose()) {
@@ -148,7 +150,7 @@ int main() {
       if (frame_idx == 0) reset(); // move rope end to initial hand position
 #else
       dvec3 in = ThreeDofInput(*window, "IKJLUM");
-      manip.pos += manip.vel + dt;
+      manip.pos += manip.vel * dt;
       manip.vel = in * 1e0;
 #endif
 

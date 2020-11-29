@@ -1,4 +1,6 @@
+#ifdef _WIN32
 #pragma warning(disable:4267) // implicit conversions between integer types
+#endif
 #include "gl-util/vertex-array.h"
 
 namespace GL {

@@ -17,8 +17,8 @@ struct tquat {
   // Angle in radians. Angle is measured clockwise
   // when viewed with view direction equal to axis.
   tquat(T angle, tvec3<T> axis) {
-    T sn = std::sin(angle * .5f);
-    T cs = std::cos(angle * .5f);
+    T sn = sin(angle * .5f);
+    T cs = cos(angle * .5f);
     a = cs;
     axis.NormalizeMe();
     axis *= sn;
