@@ -76,6 +76,11 @@ struct tvec3 {
                         z, 0, -x,
                         -y, x, 0);
   }
+
+  // Returns some vector (of arbitrary length) perpendicular to this.
+  tvec3<ftype> ArbitraryPerpendicular() const {
+    return Cross(abs(x) > abs(y) + abs(z) ? tvec3<ftype>(0, 1, 1) : tvec3(1, 0, 0));
+  }
   
   ftype LengthSquare() const { return Dot(*this); }
   ftype Length() const { return sqrt(LengthSquare()); }

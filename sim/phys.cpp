@@ -63,8 +63,19 @@ void Rope::Create(size_t n) {
     double ang = M_PI*i/n;
     verts[i].pos = dvec3(r*sin(ang), -r+r*cos(ang), 0);
     verts[i].vel = dvec3();
-    verts[i].mass = density * max_segment_length * ((i==0 || i==n) ? .5 : 1.);
     if (i) verts[i-1].target_length = (verts[i].pos - verts[i-1].pos).Length();
+  }
+  RecalculateMasses();
+}
+
+void Rope::RecalculateMasses() {
+  // Calculate masses of verts.
+  for (auto& v : verts) v.mass = 0;
+  double mass_per_unit_length = density * M_PI * radius * radius;
+  for (size_t i = 0; i + 1 < verts.size(); ++i) {
+    double d = verts[i].target_length;
+    verts[i  ].mass += d/2 * mass_per_unit_length;
+    verts[i+1].mass += d/2 * mass_per_unit_length;
   }
 }
 
@@ -76,7 +87,7 @@ static void ResolveLinearConstraints(Scene& scene, Context& ctx) {
   ctx.segment_length_vars_idx = nvars;
   nvars += verts.size() - 1;
   ctx.external_constraint_vars_idx = nvars;
-  nvars += scene.external_constraints.size() * 3;
+  nvars += scene.external_constraints.size();
   ctx.constant_term_idx = nvars;
   ctx.verts.assign(verts.size(), {});
 
@@ -94,11 +105,8 @@ static void ResolveLinearConstraints(Scene& scene, Context& ctx) {
   // External constrains impulses.
   for (size_t i = 0; i < scene.external_constraints.size(); ++i) {
     const auto& c = scene.external_constraints[i];
-    double im = 1/verts[c.vert_idx].mass;
     // Imulse applied directly to the vert.
-    ctx.verts[c.vert_idx].vars.emplace_back(ctx.external_constraint_vars_idx + i*3 + 0, dvec3(im, 0, 0));
-    ctx.verts[c.vert_idx].vars.emplace_back(ctx.external_constraint_vars_idx + i*3 + 1, dvec3(0, im, 0));
-    ctx.verts[c.vert_idx].vars.emplace_back(ctx.external_constraint_vars_idx + i*3 + 2, dvec3(0, 0, im));
+    ctx.verts[c.vert_idx].vars.emplace_back(ctx.external_constraint_vars_idx + i, c.axis/verts[c.vert_idx].mass);
   }
 
   // Fill out equations.
@@ -119,14 +127,11 @@ static void ResolveLinearConstraints(Scene& scene, Context& ctx) {
   // External constraints.
   for (size_t i = 0; i < scene.external_constraints.size(); ++i) {
     const auto& c = scene.external_constraints[i];
-    // Equation that vert velocity is equal to the one in constraint.
-    ctx.equations.Add(ctx.external_constraint_vars_idx + i*3 + 0, ctx.constant_term_idx, -c.vel.x);
-    ctx.equations.Add(ctx.external_constraint_vars_idx + i*3 + 1, ctx.constant_term_idx, -c.vel.y);
-    ctx.equations.Add(ctx.external_constraint_vars_idx + i*3 + 2, ctx.constant_term_idx, -c.vel.z);
+    // Equation that vert's speed along constraint's axis is equal to the speed requested in the constraint.
+    ctx.equations.Add(ctx.external_constraint_vars_idx + i, ctx.constant_term_idx, -c.speed);
     for (const auto& [idx, v] : ctx.verts.at(c.vert_idx).vars) {
-      ctx.equations.Add(ctx.external_constraint_vars_idx + i*3 + 0, idx, v.x);
-      ctx.equations.Add(ctx.external_constraint_vars_idx + i*3 + 1, idx, v.y);
-      ctx.equations.Add(ctx.external_constraint_vars_idx + i*3 + 2, idx, v.z);
+      double proj = c.axis.Dot(v);
+      if (abs(proj) > 1e-12) ctx.equations.Add(ctx.external_constraint_vars_idx + i, idx, proj);
     }
   }
 
@@ -159,19 +164,74 @@ static void GetVertsDv(Scene& scene, Context& ctx) {
 void Scene::PhysicsStep(double dt) {
   Context ctx;
 
-  // Calculate masses of verts.
-  for (auto& v : rope.verts) v.mass = 0;
-  double mass_per_unit_length = rope.density * M_PI * pow(rope.radius, 2.);
+  // Apply various external forces.
+
+  // Gravity.
+  for (auto& v : rope.verts) v.vel += gravity * dt;
+  // Drag and lift.
   for (size_t i = 0; i + 1 < rope.verts.size(); ++i) {
-    double d = rope.verts[i].target_length;
-    rope.verts[i  ].mass += d/2 * mass_per_unit_length;
-    rope.verts[i+1].mass += d/2 * mass_per_unit_length;
+    dvec3 d = rope.verts[i].pos - rope.verts[i+1].pos;
+    // We're ignoring rotation and pretend that the segment is just moving linearly, at the velocity of its center.
+    // That should be ok because segments are short, so their rotation doesn't produce strong forces.
+    dvec3 vel = (rope.verts[i].vel + rope.verts[i+1].vel)/2;
+    double speed_squared = vel.LengthSquare();
+    double speed = sqrt(speed_squared);
+    double length = d.Length();
+
+    if (speed < 1e-3 || length < 1e-5) continue;
+
+    // Simplified model of drag and lift for a cylinder, ignoring Reynolds number, torque, interaction with adjacent segments, etc.
+    // No idea if that's a reasonable approximation of what happens between a rope and air.
+
+    // Angle of attack normalized to [0, 1] (0 is 0 degrees, 1 is 90 degrees).
+    double aoa = acos(vel.Dot(d)/speed/length)/M_PI*2;
+    aoa = std::min(aoa, 2 - aoa);
+    // Drag coefficient as function of angle of attack. Made up after staring a bit at graphs in papers
+    // "Drag and lift coefficients of inclined finite circular cylinders at moderate Reynolds numbers" and
+    // "A method for improving the dynamic simulation efficiency of underwater flexible structures by implementing non-active points in modelling".
+    // Normalized by cylinder's length*diameter, not by projected area.
+    double drag_amount = aoa*aoa*(3-aoa*2); // smoothstep, going from 0 to 1, with zero derivative at both ends (which makes physical sense because of symmetry)
+    // Lift correction coefficient, similarly pulled out of thin air based on graphs in the above two papers.
+    // Note that below we're multiplyint this by sin(angle of attack).
+    double lift_amount = (1-aoa)*2*1.414;
+
+    dvec3 drag = -vel * (speed * length * rope.radius * air_density * drag_amount * rope.drag_coefficient);
+
+    // Perpendicular to velocity, coplanar with velocity and the segment,
+    // length equal to sin(angle of attack) * segment_length * speed_squared.
+    dvec3 lift = d.Cross(vel).Cross(vel) * (d.Dot(vel) > 0 ? -1 : 1);
+    lift *= air_density * rope.radius * lift_amount * rope.lift_coefficient;
+
+    dvec3 force = lift + drag;
+    
+    rope.verts[i  ].vel += force * (dt / rope.verts[i  ].mass / 2);
+    rope.verts[i+1].vel += force * (dt / rope.verts[i+1].mass / 2);
+  }
+  // Elasticity of the joints (aka straightening force).
+  for (size_t i = 1; i + 1 < rope.verts.size(); ++i) {
+    dvec3 v1 = rope.verts[i-1].pos - rope.verts[i].pos;
+    dvec3 v2 = rope.verts[i+1].pos - rope.verts[i].pos;
+    double l1 = v1.Length(), l2 = v2.Length();
+    double l = (l1 + l2) / 2;
+
+    double torsion_coefficient = rope.modulus_of_elasticity * pow(rope.radius, 4) / l;
+    // Length is sin(ang) * l1 * l2. We'll assume that sin(ang) is close enough to ang.
+    dvec3 axis = v1.Cross(v2);
+    
+    dvec3 force1 = axis.Cross(v1) * (torsion_coefficient / l1 / l2);
+    rope.verts[i-1].vel -= force1 * (dt / rope.verts[i-1].mass);
+    rope.verts[i  ].vel += force1 * (dt / rope.verts[i  ].mass);
+
+    dvec3 force2 = axis.Cross(v2) * (torsion_coefficient / l1 / l2);
+    rope.verts[i+1].vel += force2 * (dt / rope.verts[i+1].mass);
+    rope.verts[i  ].vel -= force2 * (dt / rope.verts[i  ].mass);
   }
 
-  // Apply gravity.
-  for (auto& v : rope.verts) v.vel += gravity * dt;
+  // todo: friction
+  // todo: torsion
 
-  // todo: more forces (gravity, straightening, drag, angular kinetic friction)
+  // Resolve constraints.
+
   // todo: iterate on the set of normal reaction forces
 
   ResolveLinearConstraints(*this, ctx);
@@ -180,11 +240,7 @@ void Scene::PhysicsStep(double dt) {
 
   // Report unmet constraints.
   for (size_t i = 0; i < external_constraints.size(); ++i) {
-    bool ok = true;
-    for (size_t j = 0; j < 3; ++j) {
-      ok &= fabs(ctx.equations_residue.at(ctx.external_constraint_vars_idx + i*3 + j)) <= 1e-6;
-    }
-    external_constraints.at(i).satisfied = ok;
+    external_constraints.at(i).satisfied = fabs(ctx.equations_residue.at(ctx.external_constraint_vars_idx + i)) <= 1e-6;
   }
 
   // Apply velocity updates and advance positions.

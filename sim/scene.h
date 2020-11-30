@@ -16,13 +16,23 @@ struct Rope {
     double target_length; // of the segment between this vert and the next
   };
 
-  double density = 1e3;
-  double radius = 1e-2;
+  double density = .5e3; // half density of water - pretty light
+  double radius = 1e-2;  // 2 cm diameter - pretty thick
   double max_segment_length = 5e-2;
+  double drag_coefficient = 1;  // at 90 degree angle of attack
+  double lift_coefficient = .5; // at 45 degree angle of attack
+  // Bending stiffness.
+  // The rope will be as stiff as a solid cylinder with this modulus of elasticity (in GPa).
+  // That's not a very good model for a braided rope: as you can imagine, a nylon rope bends much easier than a solid nylon cylinder.
+  // But if we pretend that the rope is made of solid rubber (0.01 - 0.1 GPa) rather than nylon (2 - 4 GPa), it works about right.
+  // (Also, our formulas are probably off by a small constant factor, making this value even less physically interpretable.)
+  double modulus_of_elasticity = 1e9;
 
   std::vector<Vert> verts;
 
   void Create(size_t n);
+
+  void RecalculateMasses();
 };
 
 struct Camera {
@@ -39,9 +49,10 @@ struct Camera {
 
 struct RopeConstraint {
   size_t vert_idx;
-  dvec3 vel;
+  dvec3 axis; // must be unit length
+  double speed = 0; // target speed along the axis
 
-  bool satisfied; // assigned by PhysicsStep()
+  bool satisfied = false; // assigned by PhysicsStep()
 };
 
 struct Scene {
@@ -53,6 +64,7 @@ struct Scene {
 
   Rope rope;
   dvec3 gravity = dvec3(0, 0, 0);
+  double air_density = 1.2;
   // When segment length deviates from target length (because of numerical errors),
   // we force the segment to contract at rate target_len*(len/target_len-1)*segment_length_restoration_fudge_factor.
   // The units are 1/second.

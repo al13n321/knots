@@ -104,30 +104,40 @@ int main() {
     Scene scene;
 
     struct Manipulator {
-      size_t vert_idx;
-      dvec3 pos;
-      dvec3 vel;
+      size_t vert1;
+      size_t vert2;
+      dvec3 pos1;
+      dvec3 vel1;
+      dvec3 angular_velocity;
+      dvec3 dir; // from vert1 to vert2
       double homing_speed = .2;
+      double angular_homing_speed = .2;
     };
     Manipulator manip;
-    manip.vert_idx = 0;
-    scene.external_constraints.emplace_back();
-    scene.external_constraints[0].vert_idx = manip.vert_idx;
+    manip.vert1 = 0;
+    manip.vert2 = 1;
+    manip.dir = dvec3(1, 0, 0);
+    scene.external_constraints.resize(5);
+    for (int i = 0; i < 3; ++i) scene.external_constraints[i].vert_idx = manip.vert1;
+    for (int i = 3; i < 5; ++i) scene.external_constraints[i].vert_idx = manip.vert2;
+    scene.external_constraints[0].axis = dvec3(1, 0, 0);
+    scene.external_constraints[1].axis = dvec3(0, 1, 0);
+    scene.external_constraints[2].axis = dvec3(0, 0, 1);
 
     auto reset = [&] {
                    scene.rope.Create(100);
 #ifdef USE_OVR
-                   dvec3 d = manip.pos - scene.rope.verts[0].pos;
+                   dvec3 d = manip.pos1 - scene.rope.verts[0].pos;
                    for (auto& v : scene.rope.verts) v.pos += d;
 #else
-                   manip.pos = scene.rope.verts[0].pos;
-                   manip.vel = dvec3();
+                   manip.pos1 = scene.rope.verts[0].pos;
+                   manip.vel1 = dvec3();
 #endif
                  };
 
     reset();
-    //scene.gravity = dvec3(0, -9.8, 0);
-    scene.gravity = dvec3(0, -.98, 0);
+    scene.gravity = dvec3(0, -9.8, 0);
+    //scene.gravity = dvec3(0, -.98, 0);
 
     Camera camera;
     camera.pos = fvec3(-1.5, .24, 1.);
@@ -145,24 +155,48 @@ int main() {
 #ifdef USE_OVR
       ovr::FrameInfo frame;
       if (!vr.BeginFrame(frame_idx, frame)) break;
-      manip.pos = frame.hands[1].pose.position;
-      manip.vel = frame.hands[1].pose.velocity;
+      manip.pos1 = frame.hands[1].pose.position;
+      manip.vel1 = frame.hands[1].pose.velocity;
       if (frame_idx == 0) reset(); // move rope end to initial hand position
 #else
       dvec3 in = ThreeDofInput(*window, "IKJLUM");
-      manip.pos += manip.vel * dt;
-      manip.vel = in * 1e0;
+      manip.pos1 += manip.vel1 * dt;
+      manip.vel1 = in * 1e0;
 #endif
 
-      scene.external_constraints[0].vel = manip.vel;
+      // Form constraints for the manipulator.
+      dvec3 rope_dir = scene.rope.verts[1].pos - scene.rope.verts[0].pos;
+      dvec3 axis_a = rope_dir.ArbitraryPerpendicular().Normalized();
+      dvec3 axis_b = rope_dir.Cross(axis_a).Normalized();
+      scene.external_constraints[3].axis = axis_a;
+      scene.external_constraints[4].axis = axis_b;
+      for (int i = 0; i < 5; ++i) scene.external_constraints[i].speed = scene.external_constraints[i].axis.Dot(manip.vel1);
+      dvec3 vel2 = manip.angular_velocity.Cross(rope_dir);
+      scene.external_constraints[3].speed += axis_a.Dot(vel2);
+      scene.external_constraints[4].speed += axis_b.Dot(vel2);
+      // If rope somehow got away from the manipulator, pull it towards the manipulator at constant speed.
       {
-        dvec3 d = manip.pos - scene.rope.verts[manip.vert_idx].pos;
+        dvec3 d = manip.pos1 - scene.rope.verts[manip.vert1].pos;
         double l = d.Length();
-        if (l > 1e-9) {
+        if (l > 1e-6) {
           // Pull the vert towards the manipulator at constant speed.
-          scene.external_constraints[0].vel += d*(std::min(l/dt, manip.homing_speed)/l);
+          double c = std::min(l/dt, manip.homing_speed)/l;
+          for (int i = 0; i < 5; ++i) scene.external_constraints[i].speed += scene.external_constraints[i].axis.Dot(d)*c;
         }
       }
+      // Similarly pull rope's orientation towards manipulator's orientation.
+      // todo: Uncomment after testing that the angular velocity constraint works.
+      /*
+      {
+        double ang = acos(manip.dir.Dot(rope_dir.Normalized()));
+        std::cerr << ang << std::endl;
+        if (fabs(ang) > 1e-6) {
+          dvec3 ang_vel = -manip.dir.Cross(rope_dir).Normalized() * std::min(fabs(ang)/dt, manip.angular_homing_speed);
+          dvec3 add_vel2 = ang_vel.Cross(rope_dir);
+          scene.external_constraints[3].speed += axis_a.Dot(add_vel2);
+          scene.external_constraints[4].speed += axis_b.Dot(add_vel2);
+        }
+      }//*/
 
       const int substeps = 1;
       for (int i = 0; i < substeps; ++i) scene.PhysicsStep(dt/substeps);
