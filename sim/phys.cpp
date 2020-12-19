@@ -58,10 +58,11 @@ void Scene::PrintStats() const {
 void Rope::Create(size_t n) {
   verts.resize(n+1);
   // arrange into a semicircle for now
-  double r = n*max_segment_length/M_PI;
+  //double r = n*max_segment_length/M_PI;
   for(size_t i = 0; i <= n; ++i) {
-    double ang = M_PI*i/n;
-    verts[i].pos = dvec3(r*sin(ang), -r+r*cos(ang), 0);
+    //double ang = M_PI*i/n;
+    //verts[i].pos = dvec3(r*sin(ang), -r+r*cos(ang), 0);
+    verts[i].pos = dvec3(i*max_segment_length, 0, 0);
     verts[i].vel = dvec3();
     if (i) verts[i-1].target_length = (verts[i].pos - verts[i-1].pos).Length();
   }
@@ -148,7 +149,16 @@ static void ResolveLinearConstraints(Scene& scene, Context& ctx) {
   if (unsatisfied != 0) std::cerr << unsatisfied << " unsatisfied equations" << std::endl;
   for (int r = 0; r < original_equations.rows.size(); ++r) {
     double s = 0;
-    for (auto p : original_equations.rows.at(r)) s += p.second * ctx.solution.at(p.first);
+    for (auto p : original_equations.rows.at(r)) {
+      s += p.second * ctx.solution.at(p.first);
+    }
+    // todo: remove debug logging
+    if (fabs(s - ctx.equations_residue.at(r)) > 1e-9) {
+      std::cerr << r << ' ' << s << ' ' << ctx.equations_residue.at(r) << std::endl;
+      for (auto p : original_equations.rows.at(r)) {
+        std::cerr << p.first << ' ' << p.second << ' ' << ctx.solution.at(p.first) << std::endl;
+      }
+    }
     assert(fabs(s - ctx.equations_residue.at(r)) <= 1e-9);
   }
 }
@@ -214,15 +224,30 @@ void Scene::PhysicsStep(double dt) {
     double l1 = v1.Length(), l2 = v2.Length();
     double l = (l1 + l2) / 2;
 
-    double torsion_coefficient = rope.modulus_of_elasticity * pow(rope.radius, 4) / l;
-    // Length is sin(ang) * l1 * l2. We'll assume that sin(ang) is close enough to ang.
-    dvec3 axis = v1.Cross(v2);
-    
-    dvec3 force1 = axis.Cross(v1) * (torsion_coefficient / l1 / l2);
+    double ang = acos(-v1.Dot(v2) / l1 / l2);
+    if (ang <= 1e-6 || ang > M_PI-1e-6) continue;
+
+    double torque = 1 / l * rope.modulus_of_elasticity * pow(rope.radius, 4);
+    dvec3 axis = v1.Cross(v2).Normalized();
+
+    // If we pretend that joints are springs, the restoring torque is just proportional to the angle.
+    // For small angles this is right (and normally our angles should be small because of adaptive segment lengths),
+    // but for extreme angles (close to 180 degrees), it seems better for the torque to tend to infinity, to keep the rope from bending sharply.
+    // To achieve that we use formula (9) from paper "Dynamics of a rope modeled as a multi-body system with elastic joints".
+    // I don't really understand the derivation of the formula (as well as most of the paper, for that matter), but the shape of the
+    // function looks good: it's close to f(x)=x near zero and goes to +- infinity at +- pi.
+    // todo: figure out why this breaks everything so badly
+    torque *= ang;
+    //torque *= 0;
+    //torque *= sin(ang);
+    //torque *= sin(ang/2) / cos(ang/2) * 2;
+    //std::cerr << ang << ' ' << torque << ' ' << sin(ang/2) / (cs * cs) * 2 << ' ' << axis << std::endl;
+
+    dvec3 force1 = axis.Cross(v1) * (torque / l1 * rope.verts[i-1].target_length);
     rope.verts[i-1].vel -= force1 * (dt / rope.verts[i-1].mass);
     rope.verts[i  ].vel += force1 * (dt / rope.verts[i  ].mass);
 
-    dvec3 force2 = axis.Cross(v2) * (torsion_coefficient / l1 / l2);
+    dvec3 force2 = axis.Cross(v2) * (torque / l2 * rope.verts[i].target_length);
     rope.verts[i+1].vel += force2 * (dt / rope.verts[i+1].mass);
     rope.verts[i  ].vel -= force2 * (dt / rope.verts[i  ].mass);
   }

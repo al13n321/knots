@@ -16,8 +16,8 @@ struct Rope {
     double target_length; // of the segment between this vert and the next
   };
 
-  double density = .5e3; // half density of water - pretty light
-  double radius = 1e-2;  // 2 cm diameter - pretty thick
+  double density = .3e3; // 300 g/m^3 - light cotton rope
+  double radius = .65e-2;  // 1.3 cm diameter - pretty thick
   double max_segment_length = 5e-2;
   double drag_coefficient = 1;  // at 90 degree angle of attack
   double lift_coefficient = .5; // at 45 degree angle of attack
@@ -26,7 +26,7 @@ struct Rope {
   // That's not a very good model for a braided rope: as you can imagine, a nylon rope bends much easier than a solid nylon cylinder.
   // But if we pretend that the rope is made of solid rubber (0.01 - 0.1 GPa) rather than nylon (2 - 4 GPa), it works about right.
   // (Also, our formulas are probably off by a small constant factor, making this value even less physically interpretable.)
-  double modulus_of_elasticity = 1e9;
+  double modulus_of_elasticity = .1e9;
 
   std::vector<Vert> verts;
 

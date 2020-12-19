@@ -88,11 +88,11 @@ int main() {
     glfw::Window win_(ivec2(0, 20), ivec2(900, 900), "hello world", false);
     ::window = &win_;
     window->MakeCurrent();
-    glfwSwapInterval(0);
     GL::InitGl3wIfNeeded();
     GL::LogInfo();
 
 #ifdef USE_OVR
+    glfwSwapInterval(0);
     if (!vr.InitSwapChains()) return 1;
 #endif
 
@@ -125,7 +125,7 @@ int main() {
     scene.external_constraints[2].axis = dvec3(0, 0, 1);
 
     auto reset = [&] {
-                   scene.rope.Create(100);
+                   scene.rope.Create(2);
 #ifdef USE_OVR
                    dvec3 d = manip.pos1 - scene.rope.verts[0].pos;
                    for (auto& v : scene.rope.verts) v.pos += d;
@@ -136,8 +136,8 @@ int main() {
                  };
 
     reset();
-    scene.gravity = dvec3(0, -9.8, 0);
-    //scene.gravity = dvec3(0, -.98, 0);
+    //scene.gravity = dvec3(0, -9.8, 0);
+    scene.gravity = dvec3(0, -.98, 0);
 
     Camera camera;
     camera.pos = fvec3(-1.5, .24, 1.);
