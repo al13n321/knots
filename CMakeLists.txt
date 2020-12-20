@@ -20,7 +20,7 @@ include_directories(
 IF (MSVC)
   SET (CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} /W3 /WX /O2 /MT /D _CRT_SECURE_NO_WARNINGS /EHsc /std:c++17")
   
-  add_definitions(-DUSE_OVR)
+  #add_definitions(-DUSE_OVR)
 
   include_directories(
     ./lib/glfw-3.3.2.bin.WIN64/include/
@@ -63,8 +63,7 @@ add_executable(knots
   util/stopwatch.cpp
   lib/gl3w/src/gl3w.c
   sim/render.cpp
-  sim/phys.cpp
- "vr/ovr-util.h")
+  sim/phys.cpp)
 
 target_link_libraries(knots
   ${LIBS}

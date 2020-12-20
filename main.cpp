@@ -2,6 +2,9 @@
 #pragma warning(disable:4305) // truncating double literal to float
 #endif
 #include <iostream>
+#include <cassert>
+#include <float.h>
+#pragma fenv_access (on)
 #include "gl-util/glfw-util.h"
 #include "util/stopwatch.h"
 #include "util/quat.h"
@@ -78,6 +81,12 @@ double rnd() {
 
 int main() {
   try {
+    // Crash on floating point errors instead of spreading NaNs.
+    {
+      auto r = _controlfp_s(nullptr, 0u, _EM_INVALID | _EM_ZERODIVIDE | _EM_OVERFLOW);
+      assert(r == 0);
+    }
+
 #ifdef USE_OVR
     ovr::Session vr;
     if (!vr.Init()) return 1;
@@ -125,7 +134,7 @@ int main() {
     scene.external_constraints[2].axis = dvec3(0, 0, 1);
 
     auto reset = [&] {
-                   scene.rope.Create(2);
+                   scene.rope.Create(100);
 #ifdef USE_OVR
                    dvec3 d = manip.pos1 - scene.rope.verts[0].pos;
                    for (auto& v : scene.rope.verts) v.pos += d;

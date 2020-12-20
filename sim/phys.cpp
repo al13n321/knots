@@ -5,6 +5,7 @@
 #include "util/linear.h"
 #include "util/print.h"
 #include "util/sparse.h"
+#include "util/util.h"
 #include <valarray>
 #include <cassert>
 #include <iostream>
@@ -183,6 +184,9 @@ void Scene::PhysicsStep(double dt) {
     dvec3 d = rope.verts[i].pos - rope.verts[i+1].pos;
     // We're ignoring rotation and pretend that the segment is just moving linearly, at the velocity of its center.
     // That should be ok because segments are short, so their rotation doesn't produce strong forces.
+    // todo: This doesn't prevent segments from rotating around their centers back and forth very quickly,
+    //       especially when rope is just hanging vertically. Consider changing drag to operate on individual
+    //       verts instead of segments.
     dvec3 vel = (rope.verts[i].vel + rope.verts[i+1].vel)/2;
     double speed_squared = vel.LengthSquare();
     double speed = sqrt(speed_squared);
@@ -194,7 +198,7 @@ void Scene::PhysicsStep(double dt) {
     // No idea if that's a reasonable approximation of what happens between a rope and air.
 
     // Angle of attack normalized to [0, 1] (0 is 0 degrees, 1 is 90 degrees).
-    double aoa = acos(vel.Dot(d)/speed/length)/M_PI*2;
+    double aoa = acosStable(vel.Dot(d)/speed/length)/M_PI*2;
     aoa = std::min(aoa, 2 - aoa);
     // Drag coefficient as function of angle of attack. Made up after staring a bit at graphs in papers
     // "Drag and lift coefficients of inclined finite circular cylinders at moderate Reynolds numbers" and
@@ -224,8 +228,8 @@ void Scene::PhysicsStep(double dt) {
     double l1 = v1.Length(), l2 = v2.Length();
     double l = (l1 + l2) / 2;
 
-    double ang = acos(-v1.Dot(v2) / l1 / l2);
-    if (ang <= 1e-6 || ang > M_PI-1e-6) continue;
+    double ang = acosStable(-v1.Dot(v2) / l1 / l2);
+    if (ang <= 1e-6 || ang > M_PI - 1e-6) continue;
 
     double torque = 1 / l * rope.modulus_of_elasticity * pow(rope.radius, 4);
     dvec3 axis = v1.Cross(v2).Normalized();
@@ -236,12 +240,9 @@ void Scene::PhysicsStep(double dt) {
     // To achieve that we use formula (9) from paper "Dynamics of a rope modeled as a multi-body system with elastic joints".
     // I don't really understand the derivation of the formula (as well as most of the paper, for that matter), but the shape of the
     // function looks good: it's close to f(x)=x near zero and goes to +- infinity at +- pi.
-    // todo: figure out why this breaks everything so badly
-    torque *= ang;
-    //torque *= 0;
-    //torque *= sin(ang);
-    //torque *= sin(ang/2) / cos(ang/2) * 2;
-    //std::cerr << ang << ' ' << torque << ' ' << sin(ang/2) / (cs * cs) * 2 << ' ' << axis << std::endl;
+    //torque *= ang;
+    double cs = cos(ang/2);
+    torque *= sin(ang/2) / (cs * cs);
 
     dvec3 force1 = axis.Cross(v1) * (torque / l1 * rope.verts[i-1].target_length);
     rope.verts[i-1].vel -= force1 * (dt / rope.verts[i-1].mass);

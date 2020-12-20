@@ -1,0 +1,13 @@
+pick safe timestep based on velocities
+clamp straightening force
+per-vert drag
+bending friction
+faster data structures for solver
+collisions with a static plane; unclear how to fudge positions
+friction
+resegmentation
+self-collisions
+position fudging; likely bad interaction with length-change-rate fudging, unclear how to solve
+continuous collision detection
+torsion
+Runge-Kutta
